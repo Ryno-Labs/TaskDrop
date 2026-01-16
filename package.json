@@ -1,9 +1,0 @@
-{
-  "name": "taskdrop",
-  "version": "1.0.0",
-  "description": "Send tasks. Get notified when done.",
-  "type": "module",
-  "dependencies": {
-    "@netlify/blobs": "^7.0.0"
-  }
-}
