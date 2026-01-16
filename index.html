@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskDrop</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        body { background: #0f172a; color: #f1f5f9; min-height: 100vh; }
+        .btn { transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); }
+        .btn-primary { background: #3b82f6; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-success { background: #10b981; }
+        .btn-success:hover { background: #059669; }
+        .btn-danger { background: #ef4444; }
+        .btn-danger:hover { background: #dc2626; }
+        .card { background: #1e293b; border: 1px solid #334155; }
+        .input { background: #0f172a; border: 1px solid #334155; color: #f1f5f9; }
+        .input:focus { outline: none; border-color: #3b82f6; }
+        .status-pending { background: #fbbf24; color: #000; }
+        .status-accepted { background: #3b82f6; color: #fff; }
+        .status-completed { background: #10b981; color: #fff; }
+        .status-declined { background: #ef4444; color: #fff; }
+        .fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // ============ API ============
+        const api = {
+            async call(endpoint, method = 'GET', body = null) {
+                const opts = { method, headers: { 'Content-Type': 'application/json' } };
+                if (body) opts.body = JSON.stringify(body);
+                const res = await fetch(`/.netlify/functions/${endpoint}`, opts);
+                return res.json();
+            },
+            getProjects: (email) => api.call(`data?action=getProjects&email=${encodeURIComponent(email)}`),
+            getTasks: (email) => api.call(`data?action=getTasks&email=${encodeURIComponent(email)}`),
+            getTask: (token) => api.call(`data?action=getTask&token=${token}`),
+            createProject: (data) => api.call('data', 'POST', { action: 'createProject', ...data }),
+            createTask: (data) => api.call('data', 'POST', { action: 'createTask', ...data }),
+            updateTaskStatus: (token, status, notes = '') => api.call('data', 'POST', { action: 'updateStatus', token, status, notes }),
+            deleteTask: (id) => api.call('data', 'POST', { action: 'deleteTask', id }),
+            deleteProject: (id) => api.call('data', 'POST', { action: 'deleteProject', id }),
+        };
+
+        // ============ COMPONENTS ============
+        
+        const StatusBadge = ({ status }) => {
+            const cls = `px-2 py-1 rounded text-xs font-medium status-${status}`;
+            return <span className={cls}>{status.charAt(0).toUpperCase() + status.slice(1)}</span>;
+        };
+
+        const Toast = ({ message, onClose }) => {
+            useEffect(() => { setTimeout(onClose, 3000); }, []);
+            return (
+                <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-3 rounded-lg shadow-lg fade-in">
+                    {message}
+                </div>
+            );
+        };
+
+        // ============ DOER VIEW ============
+        const DoerView = ({ token }) => {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [notes, setNotes] = useState('');
+            const [submitting, setSubmitting] = useState(false);
+
+            useEffect(() => { loadTask(); }, []);
+
+            const loadTask = async () => {
+                const result = await api.getTask(token);
+                if (result.error) setError(result.error);
+                else setData(result);
+                setLoading(false);
+            };
+
+            const handleAction = async (status) => {
+                setSubmitting(true);
+                await api.updateTaskStatus(token, status, notes);
+                await loadTask();
+                setSubmitting(false);
+            };
+
+            if (loading) return <div className="min-h-screen flex items-center justify-center"><p>Loading...</p></div>;
+            if (error) return <div className="min-h-screen flex items-center justify-center"><p className="text-red-400">{error}</p></div>;
+
+            const { task, project, allTasks } = data;
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-2xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h1 className="text-3xl font-bold mb-2">TaskDrop</h1>
+                            {project && <p className="text-slate-400">Project: {project.name}</p>}
+                        </div>
+
+                        {/* Your Task */}
+                        <div className="card rounded-xl p-6 mb-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-xl font-semibold">Your Task</h2>
+                                <StatusBadge status={task.status} />
+                            </div>
+                            
+                            <h3 className="text-2xl font-bold mb-3">{task.title}</h3>
+                            
+                            {task.details && <p className="text-slate-300 mb-4">{task.details}</p>}
+                            
+                            {task.links && task.links.length > 0 && (
+                                <div className="mb-4">
+                                    <p className="text-sm text-slate-400 mb-2">Links:</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {task.links.map((link, i) => (
+                                            <a key={i} href={link} target="_blank" className="text-blue-400 hover:text-blue-300 text-sm underline">
+                                                {(() => { try { return new URL(link).hostname; } catch { return link; } })()}
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {task.location && (
+                                <div className="mb-4">
+                                    <p className="text-sm text-slate-400 mb-1">Location:</p>
+                                    <a href={`https://maps.google.com/?q=${encodeURIComponent(task.location)}`} target="_blank" className="text-blue-400 hover:text-blue-300">
+                                        📍 {task.location}
+                                    </a>
+                                </div>
+                            )}
+
+                            {/* Actions based on status */}
+                            {task.status === 'pending' && (
+                                <div className="mt-6 flex gap-3">
+                                    <button onClick={() => handleAction('accepted')} disabled={submitting} className="btn btn-success flex-1 py-3 rounded-lg font-medium">
+                                        {submitting ? 'Processing...' : 'Accept Task'}
+                                    </button>
+                                    <button onClick={() => handleAction('declined')} disabled={submitting} className="btn btn-danger flex-1 py-3 rounded-lg font-medium">
+                                        {submitting ? 'Processing...' : 'Decline'}
+                                    </button>
+                                </div>
+                            )}
+
+                            {task.status === 'accepted' && (
+                                <div className="mt-6">
+                                    <label className="block text-sm text-slate-400 mb-2">Completion notes (optional)</label>
+                                    <textarea 
+                                        value={notes} 
+                                        onChange={(e) => setNotes(e.target.value)}
+                                        className="input w-full p-3 rounded-lg mb-3"
+                                        rows={3}
+                                        placeholder="Any notes about the completed work..."
+                                    />
+                                    <button onClick={() => handleAction('completed')} disabled={submitting} className="btn btn-success w-full py-3 rounded-lg font-medium">
+                                        {submitting ? 'Processing...' : '✓ Mark Complete'}
+                                    </button>
+                                </div>
+                            )}
+
+                            {task.status === 'completed' && (
+                                <div className="mt-6 text-center p-4 bg-green-900/30 rounded-lg">
+                                    <p className="text-green-400 text-lg">✓ Task Completed</p>
+                                    {task.completion_notes && <p className="text-slate-400 mt-2">"{task.completion_notes}"</p>}
+                                </div>
+                            )}
+
+                            {task.status === 'declined' && (
+                                <div className="mt-6 text-center p-4 bg-red-900/30 rounded-lg">
+                                    <p className="text-red-400">Task Declined</p>
+                                    <p className="text-slate-400 text-sm mt-1">The sender has been notified</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Other Tasks in Project */}
+                        {allTasks && allTasks.length > 1 && (
+                            <div className="card rounded-xl p-6">
+                                <h3 className="font-semibold mb-4">All Tasks in This Project</h3>
+                                <div className="space-y-2">
+                                    {allTasks.map(t => (
+                                        <div key={t.id} className={`flex items-center justify-between p-3 rounded-lg ${t.id === task.id ? 'bg-blue-900/30 border border-blue-500/50' : 'bg-slate-800'}`}>
+                                            <div>
+                                                <p className={t.status === 'completed' ? 'line-through text-slate-500' : ''}>{t.title}</p>
+                                                <p className="text-xs text-slate-500">{t.assignee_name || 'Unassigned'}</p>
+                                            </div>
+                                            <StatusBadge status={t.status} />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ============ SENDER DASHBOARD ============
+        const Dashboard = () => {
+            const [email, setEmail] = useState(() => localStorage.getItem('taskdrop_email') || '');
+            const [loggedIn, setLoggedIn] = useState(() => !!localStorage.getItem('taskdrop_email'));
+            const [projects, setProjects] = useState([]);
+            const [tasks, setTasks] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [view, setView] = useState('dashboard'); // dashboard, newTask, newProject
+            const [toast, setToast] = useState(null);
+            const [selectedProject, setSelectedProject] = useState(null);
+
+            // Form states
+            const [taskTitle, setTaskTitle] = useState('');
+            const [taskDetails, setTaskDetails] = useState('');
+            const [taskAssigneeName, setTaskAssigneeName] = useState('');
+            const [taskAssigneeEmail, setTaskAssigneeEmail] = useState('');
+            const [taskLinks, setTaskLinks] = useState('');
+            const [taskLocation, setTaskLocation] = useState('');
+            const [projectName, setProjectName] = useState('');
+            const [projectDesc, setProjectDesc] = useState('');
+            const [projectTasks, setProjectTasks] = useState([{ title: '', assigneeName: '', assigneeEmail: '' }]);
+            const [submitting, setSubmitting] = useState(false);
+
+            useEffect(() => { if (loggedIn) loadData(); }, [loggedIn]);
+
+            const loadData = async () => {
+                setLoading(true);
+                const [p, t] = await Promise.all([api.getProjects(email), api.getTasks(email)]);
+                setProjects(Array.isArray(p) ? p : []);
+                setTasks(Array.isArray(t) ? t : []);
+                setLoading(false);
+            };
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                localStorage.setItem('taskdrop_email', email);
+                setLoggedIn(true);
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('taskdrop_email');
+                setLoggedIn(false);
+                setEmail('');
+            };
+
+            const resetForms = () => {
+                setTaskTitle(''); setTaskDetails(''); setTaskAssigneeName(''); setTaskAssigneeEmail('');
+                setTaskLinks(''); setTaskLocation('');
+                setProjectName(''); setProjectDesc(''); setProjectTasks([{ title: '', assigneeName: '', assigneeEmail: '' }]);
+            };
+
+            const handleCreateTask = async (e) => {
+                e.preventDefault();
+                setSubmitting(true);
+                const links = taskLinks.split('\n').filter(l => l.trim());
+                await api.createTask({
+                    ownerEmail: email,
+                    title: taskTitle,
+                    details: taskDetails,
+                    assigneeName: taskAssigneeName,
+                    assigneeEmail: taskAssigneeEmail,
+                    links,
+                    location: taskLocation
+                });
+                resetForms();
+                setView('dashboard');
+                await loadData();
+                setToast('Task created and email sent!');
+                setSubmitting(false);
+            };
+
+            const handleCreateProject = async (e) => {
+                e.preventDefault();
+                setSubmitting(true);
+                await api.createProject({
+                    ownerEmail: email,
+                    name: projectName,
+                    description: projectDesc,
+                    tasks: projectTasks.filter(t => t.title && t.assigneeEmail)
+                });
+                resetForms();
+                setView('dashboard');
+                await loadData();
+                setToast('Project created and emails sent!');
+                setSubmitting(false);
+            };
+
+            const addProjectTask = () => {
+                setProjectTasks([...projectTasks, { title: '', assigneeName: '', assigneeEmail: '' }]);
+            };
+
+            const updateProjectTask = (index, field, value) => {
+                const updated = [...projectTasks];
+                updated[index][field] = value;
+                setProjectTasks(updated);
+            };
+
+            const removeProjectTask = (index) => {
+                setProjectTasks(projectTasks.filter((_, i) => i !== index));
+            };
+
+            const handleDeleteTask = async (id) => {
+                if (!confirm('Delete this task?')) return;
+                await api.deleteTask(id);
+                await loadData();
+                setToast('Task deleted');
+            };
+
+            const handleDeleteProject = async (id) => {
+                if (!confirm('Delete this project and all its tasks?')) return;
+                await api.deleteProject(id);
+                await loadData();
+                setSelectedProject(null);
+                setToast('Project deleted');
+            };
+
+            // Login Screen
+            if (!loggedIn) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-6">
+                        <div className="card rounded-xl p-8 w-full max-w-md">
+                            <h1 className="text-3xl font-bold text-center mb-2">TaskDrop</h1>
+                            <p className="text-slate-400 text-center mb-8">Send tasks. Get notified when done.</p>
+                            <form onSubmit={handleLogin}>
+                                <label className="block text-sm text-slate-400 mb-2">Your Email</label>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="input w-full p-3 rounded-lg mb-4"
+                                    placeholder="you@example.com"
+                                    required
+                                />
+                                <button type="submit" className="btn btn-primary w-full py-3 rounded-lg font-medium">
+                                    Get Started
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            // New Single Task Form
+            if (view === 'newTask') {
+                return (
+                    <div className="min-h-screen p-6">
+                        <div className="max-w-xl mx-auto">
+                            <button onClick={() => setView('dashboard')} className="text-slate-400 hover:text-white mb-6">← Back</button>
+                            <div className="card rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-6">Create Single Task</h2>
+                                <form onSubmit={handleCreateTask}>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm text-slate-400 mb-1">Task Title *</label>
+                                            <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} className="input w-full p-3 rounded-lg" required />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-slate-400 mb-1">Details</label>
+                                            <textarea value={taskDetails} onChange={(e) => setTaskDetails(e.target.value)} className="input w-full p-3 rounded-lg" rows={3} />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm text-slate-400 mb-1">Assignee Name</label>
+                                                <input type="text" value={taskAssigneeName} onChange={(e) => setTaskAssigneeName(e.target.value)} className="input w-full p-3 rounded-lg" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm text-slate-400 mb-1">Assignee Email *</label>
+                                                <input type="email" value={taskAssigneeEmail} onChange={(e) => setTaskAssigneeEmail(e.target.value)} className="input w-full p-3 rounded-lg" required />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-slate-400 mb-1">Links (one per line)</label>
+                                            <textarea value={taskLinks} onChange={(e) => setTaskLinks(e.target.value)} className="input w-full p-3 rounded-lg" rows={2} placeholder="https://..." />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-slate-400 mb-1">Location</label>
+                                            <input type="text" value={taskLocation} onChange={(e) => setTaskLocation(e.target.value)} className="input w-full p-3 rounded-lg" placeholder="Address or place" />
+                                        </div>
+                                    </div>
+                                    <button type="submit" disabled={submitting} className="btn btn-primary w-full py-3 rounded-lg font-medium mt-6">
+                                        {submitting ? 'Creating...' : 'Create & Send Task'}
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // New Project Form
+            if (view === 'newProject') {
+                return (
+                    <div className="min-h-screen p-6">
+                        <div className="max-w-2xl mx-auto">
+                            <button onClick={() => setView('dashboard')} className="text-slate-400 hover:text-white mb-6">← Back</button>
+                            <div className="card rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-6">Create Project</h2>
+                                <form onSubmit={handleCreateProject}>
+                                    <div className="space-y-4 mb-6">
+                                        <div>
+                                            <label className="block text-sm text-slate-400 mb-1">Project Name *</label>
+                                            <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="input w-full p-3 rounded-lg" required />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-slate-400 mb-1">Description</label>
+                                            <textarea value={projectDesc} onChange={(e) => setProjectDesc(e.target.value)} className="input w-full p-3 rounded-lg" rows={2} />
+                                        </div>
+                                    </div>
+
+                                    <h3 className="font-semibold mb-3">Tasks</h3>
+                                    <div className="space-y-3 mb-4">
+                                        {projectTasks.map((task, i) => (
+                                            <div key={i} className="bg-slate-800 p-4 rounded-lg">
+                                                <div className="flex justify-between items-center mb-3">
+                                                    <span className="text-sm text-slate-400">Task {i + 1}</span>
+                                                    {projectTasks.length > 1 && (
+                                                        <button type="button" onClick={() => removeProjectTask(i)} className="text-red-400 text-sm">Remove</button>
+                                                    )}
+                                                </div>
+                                                <div className="space-y-3">
+                                                    <input
+                                                        type="text"
+                                                        value={task.title}
+                                                        onChange={(e) => updateProjectTask(i, 'title', e.target.value)}
+                                                        className="input w-full p-2 rounded"
+                                                        placeholder="Task title"
+                                                    />
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <input
+                                                            type="text"
+                                                            value={task.assigneeName}
+                                                            onChange={(e) => updateProjectTask(i, 'assigneeName', e.target.value)}
+                                                            className="input w-full p-2 rounded"
+                                                            placeholder="Assignee name"
+                                                        />
+                                                        <input
+                                                            type="email"
+                                                            value={task.assigneeEmail}
+                                                            onChange={(e) => updateProjectTask(i, 'assigneeEmail', e.target.value)}
+                                                            className="input w-full p-2 rounded"
+                                                            placeholder="Assignee email"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <button type="button" onClick={addProjectTask} className="text-blue-400 text-sm mb-6">+ Add another task</button>
+
+                                    <button type="submit" disabled={submitting} className="btn btn-primary w-full py-3 rounded-lg font-medium">
+                                        {submitting ? 'Creating...' : 'Create Project & Send Tasks'}
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Project Detail View
+            if (selectedProject) {
+                const projectTasks = tasks.filter(t => t.project_id === selectedProject.id);
+                const completed = projectTasks.filter(t => t.status === 'completed').length;
+                
+                return (
+                    <div className="min-h-screen p-6">
+                        <div className="max-w-4xl mx-auto">
+                            <button onClick={() => setSelectedProject(null)} className="text-slate-400 hover:text-white mb-6">← Back</button>
+                            
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h1 className="text-2xl font-bold">{selectedProject.name}</h1>
+                                    {selectedProject.description && <p className="text-slate-400">{selectedProject.description}</p>}
+                                </div>
+                                <button onClick={() => handleDeleteProject(selectedProject.id)} className="text-red-400 hover:text-red-300 text-sm">Delete Project</button>
+                            </div>
+
+                            <div className="card rounded-xl p-4 mb-6">
+                                <div className="flex justify-between text-sm mb-2">
+                                    <span className="text-slate-400">{completed} of {projectTasks.length} completed</span>
+                                    <span className="text-blue-400">{projectTasks.length > 0 ? Math.round((completed / projectTasks.length) * 100) : 0}%</span>
+                                </div>
+                                <div className="h-2 bg-slate-700 rounded-full">
+                                    <div className="h-2 bg-blue-500 rounded-full" style={{ width: `${projectTasks.length > 0 ? (completed / projectTasks.length) * 100 : 0}%` }}></div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                {projectTasks.map(task => (
+                                    <div key={task.id} className="card rounded-xl p-4">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className={`font-medium ${task.status === 'completed' ? 'line-through text-slate-500' : ''}`}>{task.title}</p>
+                                                <p className="text-sm text-slate-400">
+                                                    {task.assignee_name || 'Unknown'} • {task.assignee_email}
+                                                </p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <StatusBadge status={task.status} />
+                                                <button onClick={() => handleDeleteTask(task.id)} className="text-slate-500 hover:text-red-400">×</button>
+                                            </div>
+                                        </div>
+                                        {task.completion_notes && (
+                                            <p className="text-sm text-slate-500 mt-2 italic">"{task.completion_notes}"</p>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+                    </div>
+                );
+            }
+
+            // Main Dashboard
+            const standaloneTasks = tasks.filter(t => !t.project_id);
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-4xl mx-auto">
+                        {/* Header */}
+                        <div className="flex justify-between items-center mb-8">
+                            <div>
+                                <h1 className="text-2xl font-bold">TaskDrop</h1>
+                                <p className="text-slate-400 text-sm">{email}</p>
+                            </div>
+                            <div className="flex gap-3">
+                                <button onClick={() => setView('newTask')} className="btn btn-primary px-4 py-2 rounded-lg text-sm">+ New Task</button>
+                                <button onClick={() => setView('newProject')} className="btn bg-slate-700 px-4 py-2 rounded-lg text-sm">+ New Project</button>
+                                <button onClick={handleLogout} className="text-slate-400 hover:text-white text-sm px-3">Logout</button>
+                            </div>
+                        </div>
+
+                        {loading ? (
+                            <p className="text-slate-400">Loading...</p>
+                        ) : (
+                            <>
+                                {/* Projects */}
+                                {projects.length > 0 && (
+                                    <div className="mb-8">
+                                        <h2 className="text-lg font-semibold mb-4">Projects</h2>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {projects.map(project => {
+                                                const projectTasks = tasks.filter(t => t.project_id === project.id);
+                                                const completed = projectTasks.filter(t => t.status === 'completed').length;
+                                                return (
+                                                    <div key={project.id} onClick={() => setSelectedProject(project)} className="card rounded-xl p-4 cursor-pointer hover:bg-slate-700/50">
+                                                        <h3 className="font-semibold mb-1">{project.name}</h3>
+                                                        <p className="text-sm text-slate-400 mb-3">{completed} of {projectTasks.length} tasks complete</p>
+                                                        <div className="h-1.5 bg-slate-700 rounded-full">
+                                                            <div className="h-1.5 bg-blue-500 rounded-full" style={{ width: `${projectTasks.length > 0 ? (completed / projectTasks.length) * 100 : 0}%` }}></div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Standalone Tasks */}
+                                <div>
+                                    <h2 className="text-lg font-semibold mb-4">Tasks</h2>
+                                    {standaloneTasks.length === 0 && projects.length === 0 ? (
+                                        <div className="card rounded-xl p-8 text-center">
+                                            <p className="text-slate-400 mb-4">No tasks yet. Create your first task or project!</p>
+                                            <div className="flex justify-center gap-3">
+                                                <button onClick={() => setView('newTask')} className="btn btn-primary px-4 py-2 rounded-lg">Create Task</button>
+                                                <button onClick={() => setView('newProject')} className="btn bg-slate-700 px-4 py-2 rounded-lg">Create Project</button>
+                                            </div>
+                                        </div>
+                                    ) : standaloneTasks.length === 0 ? (
+                                        <p className="text-slate-500 text-sm">No standalone tasks</p>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {standaloneTasks.map(task => (
+                                                <div key={task.id} className="card rounded-xl p-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <p className={`font-medium ${task.status === 'completed' ? 'line-through text-slate-500' : ''}`}>{task.title}</p>
+                                                            <p className="text-sm text-slate-400">{task.assignee_name || 'Unknown'} • {task.assignee_email}</p>
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <StatusBadge status={task.status} />
+                                                            <button onClick={() => handleDeleteTask(task.id)} className="text-slate-500 hover:text-red-400">×</button>
+                                                        </div>
+                                                    </div>
+                                                    {task.completion_notes && (
+                                                        <p className="text-sm text-slate-500 mt-2 italic">"{task.completion_notes}"</p>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                    {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+                </div>
+            );
+        };
+
+        // ============ APP ROUTER ============
+        const App = () => {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('task');
+            
+            if (token) return <DoerView token={token} />;
+            return <Dashboard />;
+        };
+
+        ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+    </script>
+</body>
+</html>
